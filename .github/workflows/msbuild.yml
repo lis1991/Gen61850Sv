@@ -30,6 +30,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '5.12.12' 
+        arch: 'win64_msvc2017_64'
+
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
 
