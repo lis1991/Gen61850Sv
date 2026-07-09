@@ -1,29 +1,20 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Build Gen61850Sv
+name: Build and Release Gen61850Sv
 
 on:
   push:
     branches: [ "master" ]
+    tags:
+      - 'v*' # Триггер для создания релиза при пуше тега (например, v1.0)
   pull_request:
     branches: [ "master" ]
 
 env:
-  # Принудительно использует Node 24 для экшенов, убирая варнинг о Node 20
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Path to the solution file relative to the root of the project.
   SOLUTION_FILE_PATH: .
-
-  # Configuration type to build.
-  # You can convert this to a build matrix if you need coverage of multiple configuration types.
-  # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
   BUILD_CONFIGURATION: Release
 
 permissions:
-  contents: read
+  contents: write # Нужно для создания релиза
 
 jobs:
   build:
@@ -33,25 +24,60 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Обновлено до v2 для устранения ошибки set-output deprecated
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
+      with:
+        msbuild-architecture: x64 # Важно для линковки с x64 Qt
 
-    # Установка Qt 5.12.12 (согласно README проекта)
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
         version: '5.12.12'
-        arch: 'win64_msvc2017_64' # Тулчейн v141 соответствует VS2017
+        arch: 'win64_msvc2017_64'
         cache: true
+
+    - name: Download and setup QtMsBuild
+      shell: pwsh
+      run: |
+        $url = "https://download.qt.io/official_releases/vsaddin/3.3.1/qt-vsaddin-msbuild-3.3.1.zip"
+        $zipPath = "${{ runner.temp }}\qtmsbuild.zip"
+        $extractPath = "${{ runner.temp }}\qtmsbuild_extracted"
+        
+        Invoke-WebRequest -Uri $url -OutFile $zipPath
+        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+        
+        $qtMsBuildSource = Get-ChildItem -Path $extractPath -Recurse -Directory -Filter "QtMsBuild" | Select-Object -First 1
+        if ($qtMsBuildSource) {
+            Copy-Item -Path $qtMsBuildSource.FullName -Destination ".\QtMsBuild" -Recurse -Force
+        } else {
+            New-Item -ItemType Directory -Path ".\QtMsBuild" -Force | Out-Null
+            Copy-Item -Path "$extractPath\*" -Destination ".\QtMsBuild" -Recurse -Force
+        }
 
     - name: Restore NuGet packages
       run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
-    # Сборка через qmake/nmake вместо msbuild (требует наличия .pro файла)
-    - name: Build with qmake
-      shell: cmd
+    - name: Build solution
+      run: msbuild ${{env.SOLUTION_FILE_PATH}} /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:Platform=x64 /m
+
+    # --- Шаги для создания релиза (сработают только при пуше тега v*) ---
+    - name: Archive binaries
+      if: startsWith(github.ref, 'refs/tags/')
+      shell: pwsh
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        qmake GenSV.pro -spec win32-msvc "CONFIG+=release"
-        nmake release
+        # Ищем папку с выходными файлами (обычно x64\Release)
+        $outputDir = Get-ChildItem -Path . -Recurse -Directory -Filter "Release" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+        if ($outputDir) {
+            Compress-Archive -Path "$($outputDir.FullName)\*" -DestinationPath "Gen61850Sv-${{ github.ref_name }}.zip"
+        } else {
+            Write-Error "Release directory not found!"
+        }
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: Gen61850Sv-${{ github.ref_name }}.zip
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
