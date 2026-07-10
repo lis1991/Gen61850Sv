@@ -27,7 +27,7 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
       with:
-        msbuild-architecture: x64 # Важно для линковки с x64 Qt
+        msbuild-architecture: x64
 
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
@@ -43,10 +43,10 @@ jobs:
         $url = "https://download.qt.io/official_releases/vsaddin/3.3.1/qt-vsaddin-msbuild-3.3.1.zip"
         $zipPath = "${{ runner.temp }}\qtmsbuild.zip"
         $extractPath = "${{ runner.temp }}\qtmsbuild_extracted"
-        
+
         Invoke-WebRequest -Uri $url -OutFile $zipPath
         Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-        
+
         $qtMsBuildSource = Get-ChildItem -Path $extractPath -Recurse -Directory -Filter "QtMsBuild" | Select-Object -First 1
         if ($qtMsBuildSource) {
             Copy-Item -Path $qtMsBuildSource.FullName -Destination ".\QtMsBuild" -Recurse -Force
@@ -55,6 +55,11 @@ jobs:
             Copy-Item -Path "$extractPath\*" -Destination ".\QtMsBuild" -Recurse -Force
         }
 
+        # Сохраняем абсолютный путь в GITHUB_ENV — будет доступен всем последующим шагам
+        $absPath = (Resolve-Path ".\QtMsBuild").Path
+        echo "QTMSBUILD_DIR=$absPath" >> $env:GITHUB_ENV
+        Write-Host "QtMsBuild path: $absPath"
+
     - name: Restore NuGet packages
       run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
@@ -62,14 +67,15 @@ jobs:
       shell: pwsh
       run: |
         # GenSV.vcxproj ожидает qwt\x64\Release\qwt.lib
-        # Собираем qwt из его собственного .sln
+        # Передаём абсолютный путь QtMsBuild через /p: — иначе qwt\prj\prj.vcxproj раскрывает $(QtMsBuild) относительно себя
         msbuild qwt\qwt.sln `
           /p:Configuration=Release `
           /p:Platform=x64 `
           /p:WindowsTargetPlatformVersion=10.0 `
           /p:PlatformToolset=v143 `
-          /p:QtInstall=${{ env.Qt5_Dir }} `
-          /p:QtDir=${{ env.Qt5_Dir }} `
+          /p:QtInstall="${{ env.Qt5_Dir }}" `
+          /p:QtDir="${{ env.Qt5_Dir }}" `
+          "/p:QtMsBuild=${{ env.QTMSBUILD_DIR }}" `
           /m
 
     - name: Verify qwt.lib exists
@@ -77,24 +83,27 @@ jobs:
       run: |
         $lib = "qwt\x64\Release\qwt.lib"
         if (-not (Test-Path $lib)) {
-          Write-Error "qwt.lib not found at $lib — qwt build may have failed or uses a different output path"
+          Write-Error "qwt.lib not found at $lib"
+          Write-Host "All .lib files found under qwt\ :"
           Get-ChildItem -Path "qwt" -Recurse -Filter "*.lib" | Select-Object FullName
           exit 1
         }
-        Write-Host "Found: $lib"
+        Write-Host "OK: $lib"
 
     - name: Build solution
+      shell: pwsh
       run: |
         msbuild ${{env.SOLUTION_FILE_PATH}} `
           /p:Configuration=${{env.BUILD_CONFIGURATION}} `
           /p:Platform=x64 `
           /p:WindowsTargetPlatformVersion=10.0 `
           /p:PlatformToolset=v143 `
-          /p:QtInstall=${{ env.Qt5_Dir }} `
-          /p:QtDir=${{ env.Qt5_Dir }} `
+          /p:QtInstall="${{ env.Qt5_Dir }}" `
+          /p:QtDir="${{ env.Qt5_Dir }}" `
+          "/p:QtMsBuild=${{ env.QTMSBUILD_DIR }}" `
           /p:DefineConstants="_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS" `
           /m
-      
+
     # --- Шаги для создания релиза (сработают только при пуше тега v*) ---
     - name: Archive binaries
       if: startsWith(github.ref, 'refs/tags/')
