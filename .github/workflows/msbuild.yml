@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master" ]
     tags:
-      - 'v*' # Триггер для создания релиза при пуше тега (например, v1.0)
+      - 'v*'
   pull_request:
     branches: [ "master" ]
   workflow_dispatch:
@@ -20,7 +20,7 @@ env:
   BUILD_CONFIGURATION: Release
 
 permissions:
-  contents: write # Нужно для создания релиза
+  contents: write
 
 jobs:
   build:
@@ -68,7 +68,7 @@ jobs:
     - name: Restore NuGet packages
       run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
-    - name: Build qwt (x64 Release) — required by GenSV.vcxproj
+    - name: Build qwt (x64 Release)
       shell: pwsh
       run: |
         msbuild qwt\qwt.sln `
@@ -87,7 +87,6 @@ jobs:
         $lib = "qwt\x64\Release\qwt.lib"
         if (-not (Test-Path $lib)) {
           Write-Error "qwt.lib not found at $lib"
-          Write-Host "All .lib files found under qwt\ :"
           Get-ChildItem -Path "qwt" -Recurse -Filter "*.lib" | Select-Object FullName
           exit 1
         }
@@ -107,7 +106,6 @@ jobs:
           /p:DefineConstants="_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS" `
           /m
 
-    # Определяем имя тега: из push-тега или из ручного ввода
     - name: Resolve tag name
       id: resolve_tag
       shell: pwsh
@@ -122,17 +120,39 @@ jobs:
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
         Write-Host "Resolved tag: $tag"
 
-    - name: Archive binaries
+    - name: Deploy Qt dependencies (windeployqt)
       if: steps.resolve_tag.outputs.tag != ''
       shell: pwsh
       run: |
-        $releaseDir = ".\x64\Release"
-        if (Test-Path $releaseDir) {
-            Compress-Archive -Path "$releaseDir\*" -DestinationPath "Gen61850Sv-${{ steps.resolve_tag.outputs.tag }}.zip"
-        } else {
-            Write-Error "Release directory not found at $releaseDir"
-            exit 1
+        $exe = ".\x64\Release\GenSV.exe"
+        $deployDir = ".\deploy"
+        New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
+
+        # Копируем exe в deploy
+        Copy-Item $exe $deployDir
+
+        # Копируем WinPcap DLL если есть
+        if (Test-Path ".\WinPCap") {
+            Copy-Item ".\WinPCap\*.dll" $deployDir -ErrorAction SilentlyContinue
         }
+
+        # windeployqt копирует все Qt DLL, platforms\qwindows.dll и т.д.
+        & "${{ env.Qt5_Dir }}\bin\windeployqt.exe" "$deployDir\GenSV.exe" `
+          --release `
+          --no-translations `
+          --no-opengl-sw `
+          --dir $deployDir
+
+        Write-Host "Deploy directory contents:"
+        Get-ChildItem $deployDir -Recurse | Select-Object FullName
+
+    - name: Archive release
+      if: steps.resolve_tag.outputs.tag != ''
+      shell: pwsh
+      run: |
+        $tag = "${{ steps.resolve_tag.outputs.tag }}"
+        Compress-Archive -Path ".\deploy\*" -DestinationPath "Gen61850Sv-$tag.zip"
+        Write-Host "Archive created: Gen61850Sv-$tag.zip"
 
     - name: Create GitHub Release
       if: steps.resolve_tag.outputs.tag != ''
