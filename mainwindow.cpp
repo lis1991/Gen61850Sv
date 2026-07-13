@@ -66,7 +66,7 @@ MainWindow::MainWindow(QWidget *parent) :
     for (int i = 0; i < ifs.count(); i++) {
         //if (ifs.at(i).hardwareAddress().length() == 17 &&	// MAC 6 bytes
             //(ifs.at(i).hardwareAddress() == settings.macFront || ifs.at(i).hardwareAddress() == settings.macRear) //mac allowed) 
-        if (ifs.at(i).hardwareAddress().length() == 17 && !ifs.at(i).isLoopback()) {
+        if (ifs.at(i).hardwareAddrif (ifs.at(i).hardwareAddress().length() == 17 && !(ifs.at(i).flags() & QNetworkInterface::IsLoopBack)) {ess().length() == 17 && !ifs.at(i).isLoopback()) {
             QString ipStr = "---.---.---.---";
             for (int x = 0; x < ifs.at(i).addressEntries().count(); x++) {
                 if (ifs.at(i).addressEntries().at(x).ip().protocol() == QAbstractSocket::IPv4Protocol) {
