@@ -13,7 +13,7 @@ This repository is an active fork of the original IEC 61850-9-2 LE (Sampled Valu
 **The goal of this fork** is to refine, modernize, and stabilize the project for daily use by fixing architectural flaws (e.g., binding to IP addresses instead of network adapter GUIDs, outdated WinPcap libraries) while preserving all the useful functionality of the original tool.
 
 > **Уважение к оригиналу / Respect to the original:**  
-> Мы благодарны оригинальному автору за создание этого полезного инструмента. Данный форк создан исключительно с целью сохранить его актуальность и полезность для инженерного сообщества.  
+> Спасибо оригинальному автору за создание этого полезного инструмента. Данный форк создан исключительно с целью сохранить его актуальность и полезность для инженерного сообщества.  
 > *We are grateful to the original author for creating this useful tool. This fork is created solely to keep it relevant and useful for the engineering community.*
 
 ---
