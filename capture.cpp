@@ -386,45 +386,61 @@ void CCapture::init(const QString& streamName, const QString& mac) {
 
 void CCapture::run() {
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_if_t* alldevs;
-    pcap_findalldevs(&alldevs, errbuf);
-    pcap_if_t *d = alldevs;
+    pcap_if_t* alldevs = nullptr;
 
+    // 1. Безопасно получаем список устройств Npcap
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        qDebug() << "Ошибка pcap_findalldevs (capture): " << errbuf;
+        return;
+    }
+
+    // 2. Находим индекс интерфейса по MAC-адресу + защита
     QList<QNetworkInterface> ifs = QNetworkInterface::allInterfaces();
     int ifsID = 0;
     while (ifsID < ifs.count()) {
-        if (ifs.at(ifsID).hardwareAddress() == captureMac)
+        if (ifs.at(ifsID).hardwareAddress().toUpper() == captureMac)
             break;
         ifsID++;
     }
 
-    auto targetAddresses = ifs.at(ifsID).addressEntries();
+    // КРИТИЧЕСКАЯ ПРОВЕРКА: если MAC-адрес не найден в системе
+    if (ifsID >= ifs.count()) {
+        qDebug() << "Ошибка capture: Сетевой интерфейс с MAC-адресом" << captureMac << "не найден в системе!";
+        pcap_freealldevs(alldevs);
+        return;
+    }
+
+    // 3. НОВЫЙ СПОСОБ: Ищем соответствие по GUID, а не по IP-адресу
+    QString targetGuid = ifs.at(ifsID).name(); // В Windows это GUID, например "{12345678-...}"
+    pcap_if_t *d = alldevs;
     bool foundInterface = false;
+
     while (d) {
-        auto address = d->addresses;
-        while (address) {
-            auto addrStr = AddrToString(address->addr);
-            for (auto targetAddress : targetAddresses) {
-                if (targetAddress.ip().toString() == addrStr) {
-                    foundInterface = true;
-                    break;
-                }
-            }
-            if (foundInterface)
-                break;
-            address = address->next;
-        }
-        if (foundInterface)
+        QString pcapName = QString::fromLocal8Bit(d->name); // Обычно "\Device\NPF_{12345678-...}"
+        if (pcapName.contains(targetGuid, Qt::CaseInsensitive)) {
+            foundInterface = true;
             break;
+        }
         d = d->next;
     }
 
-    pcapHandle = pcap_open_live(d->name,            // name of the device
-        4096/*65535*/,                // portion of the packet to capture
-        1,  // promiscuous mode
-        1000,               // read timeout
-        errbuf              // error buffer
-        );
+    // 4. КРИТИЧЕСКАЯ ПРОВЕРКА: если Npcap адаптер не найден по GUID
+    if (!foundInterface || !d) {
+        qDebug() << "Ошибка capture: Не удалось найти Npcap адаптер для GUID:" << targetGuid;
+        pcap_freealldevs(alldevs);
+        return;
+    }
+
+    // 5. Теперь d гарантированно валиден. Открываем адаптер.
+    // Размер буфера увеличен до 65536 для надежности
+    pcapHandle = pcap_open_live(d->name, 65536, 1, 1000, errbuf);
+    if (!pcapHandle) {
+        qDebug() << "Ошибка capture pcap_open_live: " << errbuf;
+        pcap_freealldevs(alldevs);
+        return;
+    }
+
+    // --- ДАЛЕЕ ИДЕТ ВАШ ОРИГИНАЛЬНЫЙ КОД (компиляция фильтра и т.д.) ---
 
     // compile and set filters
     struct bpf_program filter;
@@ -503,7 +519,8 @@ void CCapture::run() {
     }
 
     //f.close();
-   
+    // Очистка ресурсов Npcap перед выходом
+    pcap_freealldevs(alldevs);
     pcap_close(pcapHandle);
     emit setCaptureIsRunning(false);
 }
