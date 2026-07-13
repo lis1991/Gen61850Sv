@@ -59,14 +59,13 @@ MainWindow::MainWindow(QWidget *parent) :
 
     
     shapeDisplay->setVisible(true);
-    
-    settings.load();
+        settings.load();
     // Generator MACs
-    QList< QNetworkInterface > ifs = QNetworkInterface::allInterfaces();
+    QList<QNetworkInterface> ifs = QNetworkInterface::allInterfaces();
     for (int i = 0; i < ifs.count(); i++) {
-        //if (ifs.at(i).hardwareAddress().length() == 17 &&	// MAC 6 bytes
-            //(ifs.at(i).hardwareAddress() == settings.macFront || ifs.at(i).hardwareAddress() == settings.macRear) //mac allowed) 
-        if (ifs.at(i).hardwareAddrif (ifs.at(i).hardwareAddress().length() == 17 && !(ifs.at(i).flags() & QNetworkInterface::IsLoopBack)) {ess().length() == 17 && !ifs.at(i).isLoopback()) {
+        // Проверяем, что это физический адаптер (длина MAC 17 символов) и это НЕ loopback
+        if (ifs.at(i).hardwareAddress().length() == 17 && !(ifs.at(i).flags() & QNetworkInterface::IsLoopBack)) {
+            
             QString ipStr = "---.---.---.---";
             for (int x = 0; x < ifs.at(i).addressEntries().count(); x++) {
                 if (ifs.at(i).addressEntries().at(x).ip().protocol() == QAbstractSocket::IPv4Protocol) {
@@ -74,13 +73,17 @@ MainWindow::MainWindow(QWidget *parent) :
                     break;
                 }
             }
-            //QString s = ifs.at(i).hardwareAddress() + " (" +  ifs.at(i).humanReadableName() + ", ip = " + ipStr + ")";
+            
             QString s = ifs.at(i).hardwareAddress() + " (";
-            if (ifs.at(i).hardwareAddress() == settings.macFront)
+            if (ifs.at(i).hardwareAddress() == settings.macFront) {
                 s += settings.frontName;
-            if (ifs.at(i).hardwareAddress() == settings.macRear)
+            } else if (ifs.at(i).hardwareAddress() == settings.macRear) {
                 s += settings.rearName;
+            } else {
+                s += ifs.at(i).humanReadableName(); // Добавил имя адаптера, если MAC не совпадает с настройками
+            }
             s += ")";
+            
             ui->genMac->addItem(s);
             ui->genMac->setProperty(QString(macPropName + "%1").arg(ui->genMac->count() - 1).toLocal8Bit(), ifs.at(i).hardwareAddress());
 
